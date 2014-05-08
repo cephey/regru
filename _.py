@@ -1,20 +1,18 @@
 #coding:utf-8
-import re
 import json
 import requests
 
-username = 'cephey'
-password = 'QYEu7Qn3Noi6W7pG1uA8'
+from settings import username, password
+
+import logging
+logger = logging.getLogger(__name__)
 
 
-class RegruException(Exception):
-    pass
+class RegRuAPI(object):
 
-
-class REGru(object):
-
-    class Methods(object):
-        CHECK_DOMAIN = 'domain/check'
+    # API methods
+    CHECK_DOMAIN = 'domain/check'
+    # end API methods
 
     BASE_URL = 'https://api.reg.ru/api/regru2'
 
@@ -27,50 +25,99 @@ class REGru(object):
         self.auth = 'username={}&password={}'.format(username, password)
 
     def request(self, url):
-        resp = requests.get(url).json()
-        if resp['result'] == 'success':
-            return resp['answer']
-        else:
-            raise RegruException('lolo')
+        """
+        Запрос в REG.RU API
 
-    def is_valid_hostname(hostname):
-        if len(hostname) > 255:
-            return False
-        if hostname[~0] == ".":
-            hostname = hostname[:-1]
-        allowed = re.compile(r'[a-zA-Z\d-]{,63}(\.[a-zA-Z\d-]{,63})*')
-        return allowed.match(hostname)
+        """
+        try:
+            response = requests.get(url).json()
+        except Exception as e:
+            logger.error(e.__str__())
+            return None
+
+        if response['result'] == 'success':
+            return response['answer']
+        else:
+            logger.error(response)
+            return None
+
+    def build_url(self, method, data):
+        """
+        Собираю URL
+
+        """
+        return '{}/{}?{}&{}'.format(self.BASE_URL, method, self.auth, data)
 
     def check_domain(self, domains):
         """
+        domains: list_of_string or string
+
+        Проверка доступности доменов
         Возвращает имена переданных доменов и их доступность
-        TODO: приводить строки к юникоду
+
+        Возвращать словарь вида:
+        {
+            u'yayayayayaya.ru': {'error_code': None,                            'result': u'Available'},
+            u'china.cn':        {'error_code': u'TLD_DISABLED',                 'result': u'error'},
+            u'ййй.me':          {'error_code': u'DOMAIN_BAD_NAME',              'result': u'error'},
+            u'ya.ru':           {'error_code': u'DOMAIN_ALREADY_EXISTS',        'result': u'error'},
+            u'a.ru':            {'error_code': u'DOMAIN_INVALID_LENGTH',        'result': u'error'},
+            u'qqйй.com':        {'error_code': u'HAVE_MIXED_CODETABLES',        'result': u'error'}
+            u'':                {'error_code': u'INVALID_DOMAIN_NAME_FORMAT',   'result': u'error'},
+            u'xn--000.com':     {'error_code': u'INVALID_DOMAIN_NAME_PUNYCODE', 'result': u'error'},
+        }
 
         """
-        data = None
-        if isinstance(domains, list):
-            data = [{'dname': name} for name in domains if name]
         if isinstance(domains, str):
-            data = [{'dname': domains}, ]
-        if data is None:
-            raise Exception('domains must be string or list of string')
+            domains = [domains, ]
 
-        domains = json.dumps({'domains': data})
+        data = []
+        if isinstance(domains, list):
+            # убираю повторяющиеся имена
+            domains = set(domains)
 
-        input_str = 'input_data={}&input_format={}'.format(domains, 'json')
+            for domain in domains:
+                print('-', domain, '-')
+                # domain = domain.decode('utf-8')
+                data.append({'dname': domain})
 
-        url = '{}/{}?{}&{}'.format(self.BASE_URL, self.Methods.CHECK_DOMAIN, self.auth, input_str)
+        domains_str = json.dumps({'domains': data})
+        input_str = 'input_data={}&input_format={}'.format(domains_str, 'json')
 
-        try:
-            resp = self.request(url)
-            return resp['domains']
-        except Exception as e:
-            print(e.__str__())
+        url = self.build_url(self.CHECK_DOMAIN, input_str)
+
+        response = self.request(url)
+
+        result = {}
+        if response:
+            for domain in response['domains']:
+                key = domain['dname'].encode('utf-8')
+                result[key] = {'result': domain['result'], 'error_code': domain.pop('error_code', None)}
+            return result
+
+        return None
+
+
+def check_available():
+    """
+    Проверка доступности доменов
+
+    """
+    domains = ["ya.ru", "yayayayayaya.ru", "xn--000.com", "", "china.cn", "ййй.me", "a.ru", "qqйй.com"]
+
+    api = RegRuAPI(username, password)
+
+    resp = api.check_domain(domains)
+
+    if resp:
+        for domain in domains:
+            if resp[domain]['result'] == 'error':
+                print(domain, resp[domain]['error_code'])
+            else:
+                print(domain, resp[domain]['result'])
+    else:
+        print(u'Ошибка сервиса')
 
 
 if __name__ == '__main__':
-    ins = REGru(username, password)
-    domains = [u"ya.ru", u"yayayayayaya.ru", u"xn--000.com", "", u"china.cn", u"ййй.me", u"wwww.ww", u"a.ru", u"qqйй.com"]
-    resp = ins.check_domain(domains)
-    for res in resp:
-        print(res['dname'], res['result'])
+    check_available()
